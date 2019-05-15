@@ -1,7 +1,11 @@
-use crate::{Result, DB_PATH};
 use crate::data::{self, Date, Sha, Status};
+use crate::{Result, DB_PATH};
 
-use rusqlite::{self, Connection, Statement,Row, NO_PARAMS, ToSql, params, types::{self, FromSql}};
+use rusqlite::{
+    self, params,
+    types::{self, FromSql},
+    Connection, Row, Statement, ToSql, NO_PARAMS,
+};
 use std::ops::Range;
 
 /// Create a new database from scratch. Will panic if the db already exists.
@@ -78,7 +82,18 @@ table!(
 table!(
     data::Sample,
     sample,
-    [pr, status, time, commits, additions, deletions, changed_files, review_comments, reviewers, first_commit],
+    [
+        pr,
+        status,
+        time,
+        commits,
+        additions,
+        deletions,
+        changed_files,
+        review_comments,
+        reviewers,
+        first_commit
+    ],
     "CREATE TABLE sample (
         id INTEGER PRIMARY KEY,
         pr INTEGER,
@@ -93,7 +108,6 @@ table!(
         first_commit TEXT NOT NULL
     )"
 );
-
 
 impl ToSql for data::PullRequest {
     fn to_sql(&self) -> rusqlite::Result<types::ToSqlOutput> {
@@ -136,9 +150,17 @@ impl FromSql for Sha {
 impl ToSql for Status {
     fn to_sql(&self) -> rusqlite::Result<types::ToSqlOutput> {
         match self {
-            Status::Open => Ok(types::ToSqlOutput::Owned(types::Value::Text("Open".to_owned()))),
-            Status::Closed(d) => Ok(types::ToSqlOutput::Owned(types::Value::Text(format!("Closed {}", d.date)))),
-            Status::Merged(d) => Ok(types::ToSqlOutput::Owned(types::Value::Text(format!("Merged {}", d.date)))),
+            Status::Open => Ok(types::ToSqlOutput::Owned(types::Value::Text(
+                "Open".to_owned(),
+            ))),
+            Status::Closed(d) => Ok(types::ToSqlOutput::Owned(types::Value::Text(format!(
+                "Closed {}",
+                d.date
+            )))),
+            Status::Merged(d) => Ok(types::ToSqlOutput::Owned(types::Value::Text(format!(
+                "Merged {}",
+                d.date
+            )))),
         }
     }
 }
@@ -177,18 +199,23 @@ impl<'conn> Reader<'conn> {
                 WHERE sample.pr = ?1"
         )?;
 
-        Ok(Reader {
-            stmt,
-            stmt_samples,
-        })
+        Ok(Reader { stmt, stmt_samples })
     }
 
+    // TODO use range
     fn read(self, _times: Range<Date>) -> Result<Vec<PullRequest>> {
-        let Reader { mut stmt, mut stmt_samples } = self;
-        // TODO use range
+        let Reader {
+            mut stmt,
+            mut stmt_samples,
+        } = self;
+
         let result = Self::collect_query(&mut stmt, NO_PARAMS, |row| {
             let mut pr = PullRequest::from_query(row)?;
-            pr.samples = Self::collect_query(&mut stmt_samples, params![row.get::<_, u32>(0)?], Sample::from_query)?;
+            pr.samples = Self::collect_query(
+                &mut stmt_samples,
+                params![row.get::<_, u32>(0)?],
+                Sample::from_query,
+            )?;
             pr.author = User::from_query(row)?;
             pr.author.url = row.get("user_url")?;
             Ok(pr)
@@ -197,8 +224,13 @@ impl<'conn> Reader<'conn> {
         Ok(result)
     }
 
-    fn collect_query<T>(stmt: &mut Statement<'conn>, params: &[&dyn ToSql], f: impl FnMut(&Row) -> rusqlite::Result<T>) -> rusqlite::Result<Vec<T>> {
-        stmt.query_map(params, f)?.collect::<::std::result::Result<Vec<T>, _>>()
+    fn collect_query<T>(
+        stmt: &mut Statement<'conn>,
+        params: &[&dyn ToSql],
+        f: impl FnMut(&Row) -> rusqlite::Result<T>,
+    ) -> rusqlite::Result<Vec<T>> {
+        stmt.query_map(params, f)?
+            .collect::<::std::result::Result<Vec<T>, _>>()
     }
 }
 
@@ -226,7 +258,12 @@ pub struct PullRequest {
     pub samples: Vec<Sample>,
 }
 
-from_query!(PullRequest, [number, title, body, created, url], author: User::default(), samples: vec![]);
+from_query!(
+    PullRequest,
+    [number, title, body, created, url],
+    author: User::default(),
+    samples: vec![]
+);
 
 #[derive(Debug, Eq, PartialEq, Default)]
 pub struct User {
@@ -249,8 +286,20 @@ pub struct Sample {
     pub first_commit: Sha,
 }
 
-from_query!(Sample, [time, status, commits, additions, deletions, changed_files, review_comments, reviewers, first_commit],);
-
+from_query!(
+    Sample,
+    [
+        time,
+        status,
+        commits,
+        additions,
+        deletions,
+        changed_files,
+        review_comments,
+        reviewers,
+        first_commit
+    ],
+);
 
 #[cfg(test)]
 mod test {
@@ -269,7 +318,7 @@ mod test {
                     date: $text.to_owned(),
                 }
             }
-        }
+        };
     }
 
     macro_rules! pr {
@@ -308,7 +357,7 @@ mod test {
                     }
                 }
             }
-        }
+        };
     }
 
     date!(date1, "2019-05-15 09:25:34");
@@ -324,8 +373,15 @@ mod test {
             pr.insert_into(&conn)?;
             pr.author.insert_into(&conn)?;
         }
-        assert_eq!(conn.query_row("SELECT COUNT(*) FROM pr", NO_PARAMS, |r| r.get::<_, u32>(0))?, 2);
-        assert_eq!(conn.query_row("SELECT COUNT(*) FROM user", NO_PARAMS, |r| r.get::<_, u32>(0))?, 1);
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM pr", NO_PARAMS, |r| r.get::<_, u32>(0))?,
+            2
+        );
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM user", NO_PARAMS, |r| r
+                .get::<_, u32>(0))?,
+            1
+        );
 
         let prs = read_prs(&conn, date1()..date1())?;
         assert_eq!(prs.len(), 2);

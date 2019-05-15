@@ -3,7 +3,7 @@
 use std::{thread, time::Duration};
 
 use futures::compat::Compat01As03;
-use hubcaps::{Credentials, Github, pulls::PullListOptions, issues::State};
+use hubcaps::{issues::State, pulls::PullListOptions, Credentials, Github};
 use rusqlite;
 
 mod data;
@@ -18,13 +18,9 @@ const OWNER: &str = "nrc";
 const REPO: &str = "gh-velocity";
 const DB_PATH: &str = "ghv-staging.db";
 
-fn ensure_pr(number: u32) {
+fn ensure_pr(number: u32) {}
 
-}
-
-fn record_sample() {
-
-}
+fn record_sample() {}
 
 fn update_from_repo() {
     let github = Github::new(
@@ -32,7 +28,12 @@ fn update_from_repo() {
         Credentials::Token(ACCESS_TOKEN.to_owned()),
     );
     let opts = PullListOptions::builder().state(State::Open).build();
-    let pulls = Compat01As03::new(github.repo(OWNER.to_owned(), REPO.to_owned()).pulls().iter(&opts));
+    let pulls = Compat01As03::new(
+        github
+            .repo(OWNER.to_owned(), REPO.to_owned())
+            .pulls()
+            .iter(&opts),
+    );
     // TODO do something with the pulls
 }
 
