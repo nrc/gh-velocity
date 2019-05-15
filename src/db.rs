@@ -1,40 +1,48 @@
 use crate::{Result, DB_PATH};
-use crate::data::{self, Date};
+use crate::data::{self, Date, Sha, Status};
 
-use rusqlite::{Connection, NO_PARAMS, ToSql, params};
+use rusqlite::{self, Connection, Statement,Row, NO_PARAMS, ToSql, params, types::{self, FromSql}};
 use std::ops::Range;
 
 /// Create a new database from scratch. Will panic if the db already exists.
 pub fn init(conn: &Connection) -> Result<()> {
-    // TODO full tables, foreign keys
-    conn.execute("CREATE TABLE pr (
-            id INTEGER PRIMARY KEY,
-            number INTEGER,
-            title TEXT NOT NULL,
-            author INTEGER
-        )", NO_PARAMS)?;
-    conn.execute("CREATE TABLE user (
-            id INTEGER PRIMARY KEY,
-            username TEXT NOT NULL
-        )", NO_PARAMS)?;
-    conn.execute("CREATE TABLE sample (
-            id INTEGER PRIMARY KEY,
-            pr INTEGER,
-            time TEXT NOT NULL
-        )", NO_PARAMS)?;
+    data::PullRequest::init(conn)?;
+    data::User::init(conn)?;
+    data::Sample::init(conn)?;
+
     // TODO indexes
 
     Ok(())
 }
 
-macro_rules! insert {
-    ($ty: ty, $sql: expr) => {
+pub fn connection() -> Result<Connection> {
+    Connection::open(DB_PATH).map_err(Into::into)
+}
+
+pub fn read_prs(conn: &Connection, _times: Range<Date>) -> Result<Vec<PullRequest>> {
+    let reader = Reader::init(conn)?;
+    reader.read(_times)
+}
+
+// FIXME: we could go further and generate the structs and CREATE statements.
+macro_rules! table {
+    ($ty: ty, $table: ident, [$($params: ident),*], $create_stmt: expr) => {
         impl $ty {
             pub fn insert_into(&self, conn: &Connection) -> Result<()> {
-                self.with_params(|params| {
-                    // TODO use prepared statements
-                    conn.execute($sql, params)
-                })?;
+                conn.execute_named(
+                    &format!(
+                        "INSERT OR IGNORE INTO {} ({}) VALUES ({})",
+                        stringify!($table),
+                        stringify!($($params),*),
+                        vec![$(format!(":{}", stringify!($params))),*].join(","),
+                    ),
+                    &[$((&format!(":{}", stringify!($params)), &self.$params as &dyn ToSql)),*],
+                )?;
+                Ok(())
+            }
+
+            fn init(conn: &Connection) -> Result<()> {
+                conn.execute($create_stmt, NO_PARAMS)?;
                 Ok(())
             }
         }
@@ -43,77 +51,206 @@ macro_rules! insert {
 
 // If the PR/User already exists in the DB then nothing is inserted and the old value
 // is kept.
-insert!(data::PullRequest, "INSERT OR IGNORE INTO pr (id, number, title, author) values (?1, ?2, ?3, ?4)");
-insert!(data::User, "INSERT OR IGNORE INTO user (id, username) values (?1, ?2)");
-insert!(data::Sample, "INSERT INTO sample (pr, time) values (?1, ?2)");
+table!(
+    data::PullRequest,
+    pr,
+    [id, number, title, body, author, created, url],
+    "CREATE TABLE pr (
+        id INTEGER PRIMARY KEY,
+        number INTEGER,
+        title TEXT NOT NULL,
+        body TEXT NOT NULL,
+        author INTEGER,
+        created TEXT NOT NULL,
+        url TEXT NOT NULL
+    )"
+);
+table!(
+    data::User,
+    user,
+    [id, username, url],
+    "CREATE TABLE user (
+        id INTEGER PRIMARY KEY,
+        username TEXT NOT NULL,
+        url TEXT NOT NULL
+    )"
+);
+table!(
+    data::Sample,
+    sample,
+    [pr, status, time, commits, additions, deletions, changed_files, review_comments, reviewers, first_commit],
+    "CREATE TABLE sample (
+        id INTEGER PRIMARY KEY,
+        pr INTEGER,
+        status TEXT NOT NULL,
+        time TEXT NOT NULL,
+        commits INTEGER,
+        additions INTEGER,
+        deletions INTEGER,
+        changed_files INTEGER,
+        review_comments INTEGER,
+        reviewers INTEGER,
+        first_commit TEXT NOT NULL
+    )"
+);
 
-pub fn connection() -> Result<Connection> {
-    Connection::open(DB_PATH).map_err(Into::into)
-}
 
-trait Params {
-    fn with_params<F, T>(&self, f: F) -> T where F: FnOnce(&[&dyn ToSql]) -> T;
-}
-
-impl Params for data::PullRequest {
-    fn with_params<F, T>(&self, f: F) -> T where F: FnOnce(&[&dyn ToSql]) -> T {
-        f(params![self.id, self.number, self.title, self.author.id])
+impl ToSql for data::PullRequest {
+    fn to_sql(&self) -> rusqlite::Result<types::ToSqlOutput> {
+        self.id.to_sql()
     }
 }
 
-impl Params for data::User {
-    fn with_params<F, T>(&self, f: F) -> T where F: FnOnce(&[&dyn ToSql]) -> T {
-        f(params![self.id, self.username])
+impl ToSql for data::User {
+    fn to_sql(&self) -> rusqlite::Result<types::ToSqlOutput> {
+        self.id.to_sql()
     }
 }
 
-impl Params for data::Sample {
-    fn with_params<F, T>(&self, f: F) -> T where F: FnOnce(&[&dyn ToSql]) -> T {
-        f(params![self.pr.id, self.time.param_str()])
+impl ToSql for Date {
+    fn to_sql(&self) -> rusqlite::Result<types::ToSqlOutput> {
+        self.date.to_sql()
     }
 }
 
-pub fn read_prs(conn: &Connection, _times: Range<Date>) -> Result<Vec<PullRequest>> {
-    // TODO range
-    let mut stmt = conn.prepare("SELECT pr.id, pr.number, pr.title, user.username FROM pr, user WHERE pr.author = user.id ORDER BY pr.number")?;
-    let mut stmt_samples = conn.prepare("SELECT sample.time FROM sample WHERE sample.pr = ?1")?;
-
-    let result = stmt.query_map(NO_PARAMS, |row| {
-        let samples = stmt_samples.query_map(params![row.get::<_, u32>(0)?], |row| {
-            Ok(Sample {
-                time: Date::new(row.get(0)?),
-            })
-        })?.collect::<::std::result::Result<Vec<_>, _>>()?;
-        Ok(PullRequest {
-            number: row.get(1)?,
-            title: row.get(2)?,
-            author: User {
-                username: row.get(3)?,
-            },
-            samples,
+impl FromSql for Date {
+    fn column_result(value: types::ValueRef) -> types::FromSqlResult<Self> {
+        Ok(Date {
+            date: FromSql::column_result(value)?,
         })
-    })?.collect::<::std::result::Result<Vec<_>, _>>().map_err(Into::into);
+    }
+}
 
-    result
+impl ToSql for Sha {
+    fn to_sql(&self) -> rusqlite::Result<types::ToSqlOutput> {
+        self.0.to_sql()
+    }
+}
+
+impl FromSql for Sha {
+    fn column_result(value: types::ValueRef) -> types::FromSqlResult<Self> {
+        Ok(Sha(FromSql::column_result(value)?))
+    }
+}
+
+impl ToSql for Status {
+    fn to_sql(&self) -> rusqlite::Result<types::ToSqlOutput> {
+        match self {
+            Status::Open => Ok(types::ToSqlOutput::Owned(types::Value::Text("Open".to_owned()))),
+            Status::Closed(d) => Ok(types::ToSqlOutput::Owned(types::Value::Text(format!("Closed {}", d.date)))),
+            Status::Merged(d) => Ok(types::ToSqlOutput::Owned(types::Value::Text(format!("Merged {}", d.date)))),
+        }
+    }
+}
+
+impl FromSql for Status {
+    fn column_result(value: types::ValueRef) -> types::FromSqlResult<Self> {
+        if let types::ValueRef::Text(s) = value {
+            match &s[0..1] {
+                "O" => return Ok(Status::Open),
+                "C" => return Ok(Status::Closed(Date::new(s[7..].to_owned()))),
+                "M" => return Ok(Status::Merged(Date::new(s[7..].to_owned()))),
+                _ => {}
+            }
+        }
+
+        Err(types::FromSqlError::InvalidType)
+    }
+}
+
+struct Reader<'conn> {
+    stmt: Statement<'conn>,
+    stmt_samples: Statement<'conn>,
+}
+
+impl<'conn> Reader<'conn> {
+    fn init(conn: &'conn Connection) -> Result<Self> {
+        let stmt = conn.prepare(
+            "SELECT pr.id, pr.number, pr.title, pr.body, user.username, user.url AS user_url, pr.created, pr.url
+                FROM pr, user
+                WHERE pr.author = user.id
+                ORDER BY pr.number"
+        )?;
+        let stmt_samples = conn.prepare(
+            "SELECT time, status, commits, additions, changed_files, review_comments, reviewers, first_commit
+                FROM sample
+                WHERE sample.pr = ?1"
+        )?;
+
+        Ok(Reader {
+            stmt,
+            stmt_samples,
+        })
+    }
+
+    fn read(self, _times: Range<Date>) -> Result<Vec<PullRequest>> {
+        let Reader { mut stmt, mut stmt_samples } = self;
+        // TODO use range
+        let result = Self::collect_query(&mut stmt, NO_PARAMS, |row| {
+            let mut pr = PullRequest::from_query(row)?;
+            pr.samples = Self::collect_query(&mut stmt_samples, params![row.get::<_, u32>(0)?], Sample::from_query)?;
+            pr.author = User::from_query(row)?;
+            pr.author.url = row.get("user_url")?;
+            Ok(pr)
+        })?;
+
+        Ok(result)
+    }
+
+    fn collect_query<T>(stmt: &mut Statement<'conn>, params: &[&dyn ToSql], f: impl FnMut(&Row) -> rusqlite::Result<T>) -> rusqlite::Result<Vec<T>> {
+        stmt.query_map(params, f)?.collect::<::std::result::Result<Vec<T>, _>>()
+    }
+}
+
+macro_rules! from_query {
+    ($ty: ident, [$($params: ident),*], $($extra: tt)*) => {
+        impl $ty {
+            fn from_query(row: &Row) -> rusqlite::Result<$ty> {
+                Ok($ty {
+                    $($params: row.get(stringify!($params))?,)*
+                    $($extra)*
+                })
+            }
+        }
+    }
 }
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct PullRequest {
     pub number: u32,
     pub title: String,
+    pub body: String,
     pub author: User,
+    pub created: Date,
+    pub url: String,
     pub samples: Vec<Sample>,
 }
 
-#[derive(Debug, Eq, PartialEq)]
+from_query!(PullRequest, [number, title, body, created, url], author: User::default(), samples: vec![]);
+
+#[derive(Debug, Eq, PartialEq, Default)]
 pub struct User {
     pub username: String,
+    pub url: String,
 }
+
+from_query!(User, [username], url: String::new());
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct Sample {
     pub time: Date,
+    pub status: Status,
+    pub commits: u32,
+    pub additions: u32,
+    pub deletions: u32,
+    pub changed_files: u32,
+    pub review_comments: u32,
+    pub reviewers: u32,
+    pub first_commit: Sha,
 }
+
+from_query!(Sample, [time, status, commits, additions, deletions, changed_files, review_comments, reviewers, first_commit],);
+
 
 #[cfg(test)]
 mod test {
@@ -125,57 +262,67 @@ mod test {
         Ok(conn)
     }
 
-    fn date1() -> data::Date {
-        data::Date {
-            date: "2019-05-15 09:25:34".to_owned(),
+    macro_rules! date {
+        ($name: ident, $text: expr) => {
+            fn $name() -> data::Date {
+                data::Date {
+                    date: $text.to_owned(),
+                }
+            }
         }
     }
 
-    fn date2() -> data::Date {
-        data::Date {
-            date: "2019-05-14 09:15:13".to_owned(),
+    macro_rules! pr {
+        ($name: ident, $id: expr, $title: expr, $created: expr, $url: expr) => {
+            impl data::PullRequest {
+                fn $name() -> data::PullRequest {
+                    data::PullRequest {
+                        id: $id,
+                        number: 100 + $id,
+                        title: $title.to_owned(),
+                        body: format!("Body of {}", $title),
+                        author: data::User {
+                            id: 42,
+                            username: "bob".to_owned(),
+                            url: "https://bob".to_owned(),
+                        },
+                        created: $created,
+                        url: $url.to_owned(),
+                    }
+                }
+            }
+
+            impl PullRequest {
+                fn $name() -> PullRequest {
+                    PullRequest {
+                        number: 100 + $id,
+                        title: $title.to_owned(),
+                        body: format!("Body of {}", $title),
+                        author: User {
+                            username: "bob".to_owned(),
+                            url: "https://bob".to_owned(),
+                        },
+                        created: $created,
+                        url: $url.to_owned(),
+                        samples: vec![],
+                    }
+                }
+            }
         }
     }
 
-    fn pr1() -> data::PullRequest {
-        data::PullRequest {
-            id: 1,
-            number: 101,
-            title: "PR number 1".to_owned(),
-            body: "Body 1".to_owned(),
-            author: data::User {
-                id: 42,
-                username: "bob".to_owned(),
-                url: "https://bob".to_owned(),
-            },
-            created: date1(),
-            url: "https://pr1".to_owned(),
-        }
-    }
-
-    fn pr2() -> data::PullRequest {
-        data::PullRequest {
-            id: 2,
-            number: 105,
-            title: "PR number 2".to_owned(),
-            body: "Body 2".to_owned(),
-            author: data::User {
-                id: 42,
-                username: "bob".to_owned(),
-                url: "https://bob".to_owned(),
-            },
-            created: date2(),
-            url: "https://pr2".to_owned(),
-        }
-    }
+    date!(date1, "2019-05-15 09:25:34");
+    date!(date2, "2019-05-14 09:15:13");
+    pr!(pr0, 1, "PR number 0", date1(), "https://pr0");
+    pr!(pr1, 2, "PR number 1", date2(), "https://pr1");
 
     #[test]
     fn insert_and_read() -> Result<()> {
         let conn = init_connection()?;
-        let prs = &[pr1(), pr2()];
+        let prs = &[data::PullRequest::pr0(), data::PullRequest::pr1()];
         for pr in prs {
-            pr.insert_into(&conn);
-            pr.author.insert_into(&conn);
+            pr.insert_into(&conn)?;
+            pr.author.insert_into(&conn)?;
         }
         assert_eq!(conn.query_row("SELECT COUNT(*) FROM pr", NO_PARAMS, |r| r.get::<_, u32>(0))?, 2);
         assert_eq!(conn.query_row("SELECT COUNT(*) FROM user", NO_PARAMS, |r| r.get::<_, u32>(0))?, 1);
@@ -183,22 +330,8 @@ mod test {
         let prs = read_prs(&conn, date1()..date1())?;
         assert_eq!(prs.len(), 2);
 
-        assert_eq!(prs[0], PullRequest {
-            number: 101,
-            title: "PR number 1".to_owned(),
-            author: User {
-                username: "bob".to_owned(),
-            },
-            samples: vec![],
-        });
-        assert_eq!(prs[1], PullRequest {
-            number: 105,
-            title: "PR number 2".to_owned(),
-            author: User {
-                username: "bob".to_owned(),
-            },
-            samples: vec![],
-        });
+        assert_eq!(prs[0], PullRequest::pr0());
+        assert_eq!(prs[1], PullRequest::pr1());
         Ok(())
     }
 }

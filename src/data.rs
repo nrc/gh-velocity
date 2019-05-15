@@ -3,8 +3,14 @@
 pub struct Sample {
     pub time: Date,
     pub pr: PullRequest,
-    pub stats: PrStats,
     pub status: Status,
+    pub commits: u32,
+    pub additions: u32,
+    pub deletions: u32,
+    pub changed_files: u32,
+    pub review_comments: u32,
+    pub reviewers: u32,
+    pub first_commit: Sha,
 }
 
 pub struct PullRequest {
@@ -15,16 +21,6 @@ pub struct PullRequest {
     pub author: User,
     pub created: Date,
     pub url: String,
-}
-
-pub struct PrStats {
-    pub commits: u32,
-    pub additions: u32,
-    pub deletions: u32,
-    pub changed_files: u32,
-    pub review_comments: u32,
-    pub reviewers: u32,
-    pub first_commit: Sha,
 }
 
 pub struct User {
@@ -49,10 +45,6 @@ pub struct Date {
 impl Date {
     pub fn new(date: String) -> Date {
         Date { date }
-    }
-
-    pub fn param_str(&self) -> &str {
-        &self.date
     }
 }
 
