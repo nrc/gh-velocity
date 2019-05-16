@@ -1,46 +1,28 @@
 #![feature(async_await)]
 
-use std::{thread, time::Duration};
-
-use futures::compat::Compat01As03;
-use hubcaps::{issues::State, pulls::PullListOptions, Credentials, Github};
+use hubcaps;
 use rusqlite;
+use std::{thread, time::Duration};
 
 mod data;
 mod db;
+mod github;
 
 /// Time between updates in seconds
 const UPDATE_TIMEOUT: u64 = 60 * 60;
 
 const USER_AGENT: &str = "gh-velocity";
 const ACCESS_TOKEN: &str = "TODO personal-access-token";
+// TODO we should work across multiple orgs/repos
 const OWNER: &str = "nrc";
 const REPO: &str = "gh-velocity";
 const DB_PATH: &str = "ghv-staging.db";
 
-fn ensure_pr(number: u32) {}
-
-fn record_sample() {}
-
-fn update_from_repo() {
-    let github = Github::new(
-        USER_AGENT.to_owned(),
-        Credentials::Token(ACCESS_TOKEN.to_owned()),
-    );
-    let opts = PullListOptions::builder().state(State::Open).build();
-    let pulls = Compat01As03::new(
-        github
-            .repo(OWNER.to_owned(), REPO.to_owned())
-            .pulls()
-            .iter(&opts),
-    );
-    // TODO do something with the pulls
-}
 
 /// Update from GitHub every `UPDATE_TIMEOUT`s.
 fn update_loop() {
     loop {
-        update_from_repo();
+        github::update_from_repo();
         thread::sleep(Duration::from_secs(UPDATE_TIMEOUT));
     }
 }
@@ -48,6 +30,7 @@ fn update_loop() {
 #[derive(Debug)]
 pub enum GhvError {
     DbError(rusqlite::Error),
+    GhError(hubcaps::Error),
 }
 
 impl From<rusqlite::Error> for GhvError {
@@ -56,10 +39,18 @@ impl From<rusqlite::Error> for GhvError {
     }
 }
 
+impl From<hubcaps::Error> for GhvError {
+    fn from(e: hubcaps::Error) -> GhvError {
+        GhvError::GhError(e)
+    }
+}
+
 type Result<T> = ::std::result::Result<T, GhvError>;
 
 fn main() {
-    let conn = db::connection().unwrap();
-    db::init(&conn).unwrap();
-    // update_loop();
+    // TODO if passed the init flag
+    // let conn = db::connection().unwrap();
+    // db::init(&conn).unwrap();
+
+    update_loop();
 }

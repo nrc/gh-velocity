@@ -9,7 +9,6 @@ pub struct Sample {
     pub deletions: u32,
     pub changed_files: u32,
     pub review_comments: u32,
-    pub reviewers: u32,
     pub first_commit: Sha,
 }
 
@@ -35,6 +34,16 @@ pub enum Status {
     Open,
     Closed(Date),
     Merged(Date),
+}
+
+impl Status {
+    pub fn from_opts(closed: Option<String>, merged: Option<String>) -> Status {
+        match (closed, merged) {
+            (None, None) => Status::Open,
+            (_, Some(s)) => Status::Merged(Date::new(s)),
+            (Some(s), _) => Status::Closed(Date::new(s)),
+        }
+    }
 }
 
 #[derive(Debug, Eq, PartialEq)]

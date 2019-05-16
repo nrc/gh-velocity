@@ -91,7 +91,6 @@ table!(
         deletions,
         changed_files,
         review_comments,
-        reviewers,
         first_commit
     ],
     "CREATE TABLE sample (
@@ -104,7 +103,6 @@ table!(
         deletions INTEGER,
         changed_files INTEGER,
         review_comments INTEGER,
-        reviewers INTEGER,
         first_commit TEXT NOT NULL
     )"
 );
@@ -194,9 +192,9 @@ impl<'conn> Reader<'conn> {
                 ORDER BY pr.number"
         )?;
         let stmt_samples = conn.prepare(
-            "SELECT time, status, commits, additions, changed_files, review_comments, reviewers, first_commit
+            "SELECT time, status, commits, additions, changed_files, review_comments, first_commit
                 FROM sample
-                WHERE sample.pr = ?1"
+                WHERE sample.pr = ?1",
         )?;
 
         Ok(Reader { stmt, stmt_samples })
@@ -282,7 +280,6 @@ pub struct Sample {
     pub deletions: u32,
     pub changed_files: u32,
     pub review_comments: u32,
-    pub reviewers: u32,
     pub first_commit: Sha,
 }
 
@@ -296,7 +293,6 @@ from_query!(
         deletions,
         changed_files,
         review_comments,
-        reviewers,
         first_commit
     ],
 );
