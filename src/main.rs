@@ -2,7 +2,7 @@
 
 use hubcaps;
 use rusqlite;
-use std::{thread, time::Duration};
+use std::{env, thread, time::Duration};
 
 mod data;
 mod db;
@@ -17,7 +17,6 @@ const ACCESS_TOKEN: &str = "TODO personal-access-token";
 const OWNER: &str = "nrc";
 const REPO: &str = "gh-velocity";
 const DB_PATH: &str = "ghv-staging.db";
-
 
 /// Update from GitHub every `UPDATE_TIMEOUT`s.
 fn update_loop() {
@@ -48,9 +47,14 @@ impl From<hubcaps::Error> for GhvError {
 type Result<T> = ::std::result::Result<T, GhvError>;
 
 fn main() {
-    // TODO if passed the init flag
-    // let conn = db::connection().unwrap();
-    // db::init(&conn).unwrap();
+    let mut args = env::args();
+    args.next().expect("No first argument?");
+    if let Some(first_arg) = args.next() {
+        if first_arg == "--init" {
+            let conn = db::connection().expect("Could not connect to db");
+            db::init(&conn).expect("Could not initialise db");
+        }
+    }
 
     update_loop();
 }

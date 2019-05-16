@@ -1,6 +1,6 @@
 use crate::data::{self, Date, Sha, Status};
 use crate::db;
-use crate::{Result, OWNER, ACCESS_TOKEN, REPO, USER_AGENT};
+use crate::{Result, ACCESS_TOKEN, OWNER, REPO, USER_AGENT};
 
 use futures::compat::Compat01As03;
 use futures::prelude::*;
@@ -10,13 +10,11 @@ use hubcaps::{
     pulls::{Pull, PullListOptions},
     Credentials, Github,
 };
-use std::{convert::TryFrom};
+use std::convert::TryFrom;
 
 pub fn update_from_repo() {
-    futures::executor::block_on(open_pull_requests()
-        .then(record_data)
-        .collect::<Vec<_>>());
-        // TODO handle any errors
+    futures::executor::block_on(open_pull_requests().then(record_data).collect::<Vec<_>>());
+    // TODO handle any errors
 }
 
 fn open_pull_requests() -> impl Stream<Item = hubcaps::Result<Pull>> {
