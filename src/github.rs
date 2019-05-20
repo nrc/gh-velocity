@@ -52,11 +52,15 @@ async fn record_data(p: hubcaps::Result<Pull>) -> Result<()> {
     let review_comments = Compat01As03::new(pull.review_comments().list())
         .await?
         .len();
-    record_sample(p, first_sha, review_comments)
+    record_sample::<db::DeployConnProvider>(p, first_sha, review_comments)
 }
 
-fn record_sample(pull: Pull, first_sha: String, review_comments: usize) -> Result<()> {
-    let conn = db::connection()?;
+fn record_sample<T: db::ConnectionProvider>(
+    pull: Pull,
+    first_sha: String,
+    review_comments: usize,
+) -> Result<()> {
+    let conn = T::connection()?;
 
     let author = data::User {
         id: saturating_from(pull.user.id),

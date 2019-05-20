@@ -62,6 +62,28 @@ pub fn weekly_stats(conn: &Connection) -> Result<Vec<frontend::Week>> {
     unimplemented!();
 }
 
+pub(crate) trait ConnectionProvider {
+    fn connection() -> Result<Connection>;
+}
+
+#[derive(Clone)]
+pub(crate) struct DeployConnProvider;
+impl ConnectionProvider for DeployConnProvider {
+    fn connection() -> Result<Connection> {
+        connection()
+    }
+}
+
+#[cfg(test)]
+#[derive(Clone)]
+pub(crate) struct TestConnProvider;
+#[cfg(test)]
+impl ConnectionProvider for TestConnProvider {
+    fn connection() -> Result<Connection> {
+        unimplemented!();
+    }
+}
+
 // FIXME: we could go further and generate the structs and CREATE statements.
 macro_rules! table {
     ($ty: ty, $table: ident, [$($params: ident),*], $create_stmt: expr) => {
