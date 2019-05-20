@@ -12,7 +12,6 @@ use hubcaps::{
 };
 use std::convert::TryFrom;
 
-// TODO tests
 pub fn update_from_repo() {
     // TODO handle any errors
     futures::executor::block_on(open_pull_requests().then(record_data).collect::<Vec<_>>());
@@ -111,4 +110,24 @@ where
 {
     v.map(|v| u32::try_from(v).unwrap_or_else(|_| u32::max_value()))
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_sat_from() {
+        assert_eq!(42, saturating_from::<u64>(42));
+        assert_eq!(u32::max_value(), saturating_from::<u64>(u32::max_value() as u64 + 500));
+        assert_eq!(42, saturating_from_opt::<u64>(Some(42)));
+        assert_eq!(u32::max_value(), saturating_from_opt::<u64>(Some(u32::max_value() as u64 + 500)));
+        assert_eq!(0, saturating_from_opt::<u64>(None));
+    }
+
+    #[test]
+    fn test_record_sample() {
+        // TODO 
+        unimplemented!();
+    }
 }

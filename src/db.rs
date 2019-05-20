@@ -30,7 +30,7 @@ pub fn read_prs(conn: &Connection, times: Range<Date>) -> Result<Vec<PullRequest
     reader.read(times)
 }
 
-// TODO tests
+// TODO test
 pub fn open_prs_per_day(conn: &Connection) -> Result<Vec<frontend::Day>> {
     let mut stmt = conn.prepare(
         "SELECT date(sample.time), COUNT(*)
