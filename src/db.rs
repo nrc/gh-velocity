@@ -1,5 +1,7 @@
+use crate::config::DB_PATH;
 use crate::data::{self, Date, Sha, Status};
-use crate::{Result, DB_PATH};
+use crate::frontend;
+use crate::Result;
 
 use rusqlite::{
     self, params,
@@ -23,9 +25,41 @@ pub fn connection() -> Result<Connection> {
     Connection::open(DB_PATH).map_err(Into::into)
 }
 
-pub fn read_prs(conn: &Connection, _times: Range<Date>) -> Result<Vec<PullRequest>> {
-    let reader = Reader::init(conn)?;
-    reader.read(_times)
+pub fn read_prs(conn: &Connection, times: Range<Date>) -> Result<Vec<PullRequest>> {
+    let reader = PrReader::init(conn)?;
+    reader.read(times)
+}
+
+// TODO tests
+pub fn open_prs_per_day(conn: &Connection) -> Result<Vec<frontend::Day>> {
+    let mut stmt = conn.prepare(
+        "SELECT date(sample.time), COUNT(*)
+            FROM sample
+            WHERE sample.status = 'Open'
+            ORDER BY sample.time
+            GROUP BY date(sample.time)",
+    )?;
+
+    let result = collect_query(&mut stmt, NO_PARAMS, |row| {
+        Ok(frontend::Day {
+            date: row.get(0)?,
+            open_prs: row.get(1)?,
+        })
+    })?;
+
+    Ok(result)
+}
+
+pub fn weekly_stats(conn: &Connection) -> Result<Vec<frontend::Week>> {
+    // TODO
+    // figure out the start date, then iterate over weeks
+    // for every PR compute the most recent sample
+    //   for each week select all 'most recent sample's which occur in that week
+    //   count the status's of those samples to get `Week::merged_prs` and `Week::closed_prs`
+    //   for each merged, lookup the PR and compute time from when it was opened to when it was merged (table a)
+    //                    record the number of review comments (table b)
+    // compute `frontend::Distribution`s from the above tables
+    unimplemented!();
 }
 
 // FIXME: we could go further and generate the structs and CREATE statements.
@@ -178,12 +212,12 @@ impl FromSql for Status {
     }
 }
 
-struct Reader<'conn> {
+struct PrReader<'conn> {
     stmt: Statement<'conn>,
     stmt_samples: Statement<'conn>,
 }
 
-impl<'conn> Reader<'conn> {
+impl<'conn> PrReader<'conn> {
     fn init(conn: &'conn Connection) -> Result<Self> {
         let stmt = conn.prepare(
             "SELECT pr.id, pr.number, pr.title, pr.body, user.username, user.url AS user_url, pr.created, pr.url
@@ -197,19 +231,19 @@ impl<'conn> Reader<'conn> {
                 WHERE sample.pr = ?1",
         )?;
 
-        Ok(Reader { stmt, stmt_samples })
+        Ok(PrReader { stmt, stmt_samples })
     }
 
     // TODO use range
     fn read(self, _times: Range<Date>) -> Result<Vec<PullRequest>> {
-        let Reader {
+        let PrReader {
             mut stmt,
             mut stmt_samples,
         } = self;
 
-        let result = Self::collect_query(&mut stmt, NO_PARAMS, |row| {
+        let result = collect_query(&mut stmt, NO_PARAMS, |row| {
             let mut pr = PullRequest::from_query(row)?;
-            pr.samples = Self::collect_query(
+            pr.samples = collect_query(
                 &mut stmt_samples,
                 params![row.get::<_, u32>(0)?],
                 Sample::from_query,
@@ -221,15 +255,15 @@ impl<'conn> Reader<'conn> {
 
         Ok(result)
     }
+}
 
-    fn collect_query<T>(
-        stmt: &mut Statement<'conn>,
-        params: &[&dyn ToSql],
-        f: impl FnMut(&Row) -> rusqlite::Result<T>,
-    ) -> rusqlite::Result<Vec<T>> {
-        stmt.query_map(params, f)?
-            .collect::<::std::result::Result<Vec<T>, _>>()
-    }
+fn collect_query<T>(
+    stmt: &mut Statement<'_>,
+    params: &[&dyn ToSql],
+    f: impl FnMut(&Row) -> rusqlite::Result<T>,
+) -> rusqlite::Result<Vec<T>> {
+    stmt.query_map(params, f)?
+        .collect::<::std::result::Result<Vec<T>, _>>()
 }
 
 macro_rules! from_query {

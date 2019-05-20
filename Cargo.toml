@@ -8,3 +8,5 @@ edition = "2018"
 futures-preview = { version = "0.3.0-alpha.16", features = ["compat"] }
 hubcaps = "0.5"
 rusqlite = "0.18"
+serde = "1.0"
+serde_derive = "1.0"

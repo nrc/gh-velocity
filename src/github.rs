@@ -1,6 +1,6 @@
+use crate::config::{ACCESS_TOKEN, OWNER, REPO, USER_AGENT};
 use crate::data::{self, Date, Sha, Status};
-use crate::db;
-use crate::{Result, ACCESS_TOKEN, OWNER, REPO, USER_AGENT};
+use crate::{db, Result};
 
 use futures::compat::Compat01As03;
 use futures::prelude::*;
@@ -12,9 +12,11 @@ use hubcaps::{
 };
 use std::convert::TryFrom;
 
+// TODO tests
 pub fn update_from_repo() {
-    futures::executor::block_on(open_pull_requests().then(record_data).collect::<Vec<_>>());
     // TODO handle any errors
+    futures::executor::block_on(open_pull_requests().then(record_data).collect::<Vec<_>>());
+    // TODO for any PR which we think is still open, but isn't in the above result, query GitHub to get a sample for when it was closed/merged
 }
 
 fn open_pull_requests() -> impl Stream<Item = hubcaps::Result<Pull>> {

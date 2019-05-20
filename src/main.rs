@@ -4,25 +4,21 @@ use hubcaps;
 use rusqlite;
 use std::{env, thread, time::Duration};
 
+use crate::frontend::Blob;
+
+mod config;
 mod data;
 mod db;
+mod frontend;
 mod github;
 
-/// Time between updates in seconds
-const UPDATE_TIMEOUT: u64 = 60 * 60;
-
-const USER_AGENT: &str = "gh-velocity";
-const ACCESS_TOKEN: &str = "TODO personal-access-token";
-// TODO we should work across multiple orgs/repos
-const OWNER: &str = "nrc";
-const REPO: &str = "gh-velocity";
-const DB_PATH: &str = "ghv-staging.db";
-
 /// Update from GitHub every `UPDATE_TIMEOUT`s.
-fn update_loop() {
+fn update_loop(blob: Blob) {
     loop {
         github::update_from_repo();
-        thread::sleep(Duration::from_secs(UPDATE_TIMEOUT));
+        // TODO deal with errors?
+        blob.update();
+        thread::sleep(Duration::from_secs(config::UPDATE_TIMEOUT));
     }
 }
 
@@ -30,6 +26,7 @@ fn update_loop() {
 pub enum GhvError {
     DbError(rusqlite::Error),
     GhError(hubcaps::Error),
+    Other,
 }
 
 impl From<rusqlite::Error> for GhvError {
@@ -41,6 +38,12 @@ impl From<rusqlite::Error> for GhvError {
 impl From<hubcaps::Error> for GhvError {
     fn from(e: hubcaps::Error) -> GhvError {
         GhvError::GhError(e)
+    }
+}
+
+impl<T> From<std::sync::PoisonError<T>> for GhvError {
+    fn from(_: std::sync::PoisonError<T>) -> GhvError {
+        GhvError::Other
     }
 }
 
@@ -56,5 +59,7 @@ fn main() {
         }
     }
 
-    update_loop();
+    let blob = Blob::new();
+    update_loop(blob.clone());
+    // TODO frontend thread
 }
